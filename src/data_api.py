@@ -14,13 +14,13 @@ import streamlit as st
 from db import get_trades
 
 
-def get_hist_klines(symbol):
+def get_hist_klines(symbol, limit=180):
     r = requests.get(
         "https://api.binance.com/api/v3/klines",
         params={
             "symbol": symbol,
             "interval": "1d",
-            "limit": 180,
+            "limit": limit,
         },
     )
     if r.status_code != 200:
@@ -43,13 +43,20 @@ def get_hist_klines(symbol):
             "ignore",
         ],
     )
-    klines_df["open_time_dt"] = klines_df["open_time"].apply(lambda x: datetime.fromtimestamp(x // 1000, tz=pytz.utc))
-    klines_df["close_time_dt"] = klines_df["close_time"].apply(lambda x: datetime.fromtimestamp(x // 1000, tz=pytz.utc))
+    klines_df[["open", "high", "low", "close"]] = klines_df[
+        ["open", "high", "low", "close"]
+    ].astype(float)
+    klines_df[["open_time_dt", "close_time_dt"]] = klines_df[
+        ["open_time", "close_time"]
+    ].applymap(lambda x: datetime.fromtimestamp(x // 1000, tz=pytz.utc))
     return klines_df
 
 
+@st.experimental_memo
 def get_avg_price_for_symbol(symbol: str) -> float:
-    r = requests.get("https://api.binance.com/api/v3/avgPrice", params={"symbol": symbol})
+    r = requests.get(
+        "https://api.binance.com/api/v3/avgPrice", params={"symbol": symbol}
+    )
     if r.status_code != 200:
         return None
     price_data = r.json()
@@ -75,7 +82,9 @@ def compute_investment(df) -> pd.DataFrame():
     trades_eur.loc[trades_eur["is_buyer"] == 1, "mult"] = -1
 
     trades_eur["eur"] = (trades_eur["quantity"] * trades_eur["mult"]).cumsum()
-    trades_eur["busd"] = (trades_eur["quantity"] * trades_eur["price"] * trades_eur["mult"]).cumsum()
+    trades_eur["busd"] = (
+        trades_eur["quantity"] * trades_eur["price"] * trades_eur["mult"]
+    ).cumsum()
     display = trades_eur[["date", "eur", "busd"]].groupby("date").last()
     # display["to_date"] = display["date"].shift(-1)
     # data = calendar_df.join(display)
@@ -116,9 +125,9 @@ def compute_investment_stats(df: pd.DataFrame) -> pd.DataFrame:
             holding = df.iloc[i - 1]["holding"]
 
             if df.iloc[i]["is_buyer"] == 1:
-                df.at[i, "average_buy_price"] = ((cur_avg_buy_price * holding) + (quantity * price)) / (
-                    holding + quantity
-                )
+                df.at[i, "average_buy_price"] = (
+                    (cur_avg_buy_price * holding) + (quantity * price)
+                ) / (holding + quantity)
                 df.at[i, "holding"] = holding + quantity
 
             else:

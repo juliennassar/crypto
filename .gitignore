@@ -1,4 +1,6 @@
 .streamlit/secrets.toml
-trades/
-__pycache__/
 .venv
+
+docker-compose.yml
+
+__pycache__/

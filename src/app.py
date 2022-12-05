@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta
 from io import StringIO
 
@@ -8,7 +9,12 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-from data_api import compute_investment_stats, get_avg_price_for_symbol, get_hist_klines, symbol_prices
+from data_api import (
+    compute_investment_stats,
+    get_avg_price_for_symbol,
+    get_hist_klines,
+    symbol_prices,
+)
 from db import get_trades
 
 st.set_page_config(
@@ -22,14 +28,9 @@ EURBUSD_rate = get_avg_price_for_symbol(EURBUSD_symbol)
 trades = get_trades()
 investment_stats_df = compute_investment_stats(df=trades)
 symbol_list = list(set(trades["symbol"].values))
+symbol_list.remove(EURBUSD_symbol)
 current_prices = symbol_prices(symbol_list)
 
-# with st.sidebar:
-#     currency = st.radio(
-#         label="currency",
-#         options=["USD", "EUR"],
-#     )
-#     symbol_filter = st.multiselect("symbol", symbol_list, default=["BTCBUSD", "ETHBUSD"])
 
 summary = (
     investment_stats_df[investment_stats_df["symbol"] != EURBUSD_symbol]
@@ -41,68 +42,116 @@ summary["value"] = summary.price * summary.holding
 summary["invested"] = summary.average_buy_price * summary.holding
 summary["pnl"] = summary.value - summary.invested
 
-st.title("Crypto dashboard")
+with st.sidebar:
+    # currency = st.radio(
+    #     label="currency",
+    #     options=["USD", "EUR"],
+    #     horizontal=True
+    # )
+    delta_type = st.radio(
+        label="delta",
+        options=["pct", "abs"],
+        horizontal=True,
+        key="delta_type",
+    )
 
-# display = compute_investment(trades)
 
-st.header("Invested")
+def display_delta(current, benchmark, delta_type=st.session_state.delta_type):
+    if delta_type == "pct":
+        val = (current - benchmark) * 100.0 / benchmark
+        return f"{val:.2f}%"
+    else:
+        val = current - benchmark
+        if val > 100:
+            return f"{round(val)} USD"
+        elif val > 10:
+            return f"{round(val, 1)} USD"
+        else:
+            return f"{round(val, 3)} USD"
 
 euros_invested = sum(
     investment_stats_df[
-        (investment_stats_df["symbol"] == EURBUSD_symbol) & (investment_stats_df["is_buyer"] == 0)
+        (investment_stats_df["symbol"] == EURBUSD_symbol)
+        & (investment_stats_df["is_buyer"] == 0)
     ].quantity
 ) - sum(
     investment_stats_df[
-        (investment_stats_df["symbol"] == EURBUSD_symbol) & (investment_stats_df["is_buyer"] == 1)
+        (investment_stats_df["symbol"] == EURBUSD_symbol)
+        & (investment_stats_df["is_buyer"] == 1)
     ].quantity
 )
 usd_invested = round(
     sum(
         investment_stats_df[
-            (investment_stats_df["symbol"] == EURBUSD_symbol) & (investment_stats_df["is_buyer"] == 0)
+            (investment_stats_df["symbol"] == EURBUSD_symbol)
+            & (investment_stats_df["is_buyer"] == 0)
         ].quote_quantity
     )
     - sum(
         investment_stats_df[
-            (investment_stats_df["symbol"] == EURBUSD_symbol) & (investment_stats_df["is_buyer"] == 1)
+            (investment_stats_df["symbol"] == EURBUSD_symbol)
+            & (investment_stats_df["is_buyer"] == 1)
         ].quote_quantity
     ),
     0,
 )
 
-st.text(f"Invested EUR {euros_invested:.2f}")
-col1, col2 = st.columns(2)
+st.title("Crypto dashboard")
+
+st.header(f"Invested {euros_invested:.2f} EUR")
+
+col1, col2 = st.columns([3, 1])
 with col1:
+    total = pd.DataFrame()
+    for symbol in symbol_list:
+        df = get_hist_klines(symbol, limit=360)[["close_time_dt", "close"]]
+        if total.empty:
+            total["dt"] = df["close_time_dt"]
+            total["value"] = 0.0
+        total[symbol] = df.close * summary.loc[symbol].holding
+        total["value"] += total[symbol]
+    st.line_chart(total, x="dt", y=symbol_list + ["value"])
+with col2:
     portfolio_value = sum(summary.holding * summary.price)
     st.metric(
-        label=f"Investment USD {usd_invested:.2f}",
+        label="Portfolio",
         value=round(portfolio_value, 2),
-        delta=round(portfolio_value - usd_invested, 2),
+        delta=display_delta(portfolio_value, usd_invested),
     )
-with col2:
     USD_purchase_price = usd_invested / euros_invested
-    st.metric(
-        label=f"EUR/BUSD {USD_purchase_price:.3f}",
-        value=round(EURBUSD_rate, 3),
-        delta=round(EURBUSD_rate - USD_purchase_price, 3),
-        delta_color="inverse",
-    )
+    # st.metric(
+    #     label=f"EUR/BUSD {USD_purchase_price:.3f}",
+    #     value=round(EURBUSD_rate, 3),
+    #     delta=display_delta(EURBUSD_rate, USD_purchase_price)
+    #     delta_color="inverse",
+    # )
 
-klines_df = pd.DataFrame(data=[date.today() - timedelta(days=x) for x in range(180)])
-# for el in summary.index:
-# klines_df[el] = get_hist_klines(el)["close"]
-col1, col2 = st.columns(2)
-with col1:
-    st.dataframe(klines_df)
-with col2:
-    st.dataframe(get_hist_klines("BTCBUSD")[["close_time_dt", "close"]])
-# st.metric(label="EUR", value=sum(summary.invested) / EURBUSD_rate, delta=sum(summary.cur_val) / EURBUSD_rate)
-st.dataframe(summary[["average_buy_price", "pnl"]])
-els = st.tabs(symbol_list)
-for el in els:
-    with el:
-        st.write("Hello workd")
-st.header("Overview 📈")
+
+for index, row in summary.sort_values(["invested"], ascending=False).iterrows():
+    if row["invested"] == 0:
+        continue
+    title = f'{index} {display_delta(row["price"],row["average_buy_price"], "pct")}, \
+    {display_delta(row["price"],row["average_buy_price"], "abs")}'
+    with st.expander(title):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(
+                label="Price",
+                value=round(row["price"], 2),
+                delta=display_delta(
+                    current=row["price"],
+                    benchmark=row["average_buy_price"],
+                ),
+            )
+        with col2:
+            st.metric(
+                label="P&L",
+                value=round(row["value"], 2),
+                delta=display_delta(
+                    current=row["value"],
+                    benchmark=row["invested"],
+                ),
+            )
 
 # symbol_filter_df = investment_stats_df["symbol"].isin(symbol_filter)
 st.dataframe(investment_stats_df, use_container_width=True)
@@ -171,21 +220,13 @@ gauge_fig = go.Figure(
 )
 
 historical_df = pd.DataFrame.from_records(data)
-historical_df["date"] = historical_df["timestamp"].apply(lambda x: datetime.fromtimestamp(int(x)))
+historical_df["date"] = historical_df["timestamp"].apply(
+    lambda x: datetime.fromtimestamp(int(x))
+)
 historical_df["value"] = historical_df["value"].astype(int)
 
-historical_fig = go.Figure()
-historical_fig.add_trace(go.Scatter(x=historical_df["date"], y=historical_df["value"], mode="lines", name="lines"))
-# historical_fig.update_layout(showlegend=False, plot_bgcolor="white", margin=dict(t=10, l=10, b=10, r=10))
-
-fig = px.line(
-    historical_df,
-    x="date",
-    y="value",
-    markers=True,
-)
 col1, col2 = st.columns(2)
 with col1:
-    st.plotly_chart(gauge_fig)
+    st.plotly_chart(gauge_fig, use_container_width=True)
 with col2:
-    st.plotly_chart(fig)
+    st.line_chart(historical_df, x="date", y="value")

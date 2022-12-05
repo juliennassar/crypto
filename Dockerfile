@@ -5,8 +5,7 @@ EXPOSE 8501
 COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
-COPY .streamlit/secrets.toml .streamlit/secrets.toml
-COPY /trades/latest.csv /trades/latest.csv
+COPY .streamlit /.streamlit/
 
 COPY src /src/
 
