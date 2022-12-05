@@ -30,7 +30,12 @@ investment_stats_df = compute_investment_stats(df=trades)
 symbol_list = list(set(trades["symbol"].values))
 symbol_list.remove(EURBUSD_symbol)
 current_prices = symbol_prices(symbol_list)
-
+period_api_mapper = {
+    "1m": (28, "1d"),
+    "3m": (90, "1d"),
+    "6m": (180, "1d"),
+    "1y": (52, "1w"),
+}
 
 summary = (
     investment_stats_df[investment_stats_df["symbol"] != EURBUSD_symbol]
@@ -41,6 +46,7 @@ summary = (
 summary["value"] = summary.price * summary.holding
 summary["invested"] = summary.average_buy_price * summary.holding
 summary["pnl"] = summary.value - summary.invested
+
 
 with st.sidebar:
     # currency = st.radio(
@@ -69,6 +75,7 @@ def display_delta(current, benchmark, delta_type=st.session_state.delta_type):
         else:
             return f"{round(val, 3)} USD"
 
+
 euros_invested = sum(
     investment_stats_df[
         (investment_stats_df["symbol"] == EURBUSD_symbol)
@@ -96,22 +103,12 @@ usd_invested = round(
     0,
 )
 
+
 st.title("Crypto dashboard")
 
-st.header(f"Invested {euros_invested:.2f} EUR")
-
-col1, col2 = st.columns([3, 1])
+col1, col2 = st.columns([1, 3])
 with col1:
-    total = pd.DataFrame()
-    for symbol in symbol_list:
-        df = get_hist_klines(symbol, limit=360)[["close_time_dt", "close"]]
-        if total.empty:
-            total["dt"] = df["close_time_dt"]
-            total["value"] = 0.0
-        total[symbol] = df.close * summary.loc[symbol].holding
-        total["value"] += total[symbol]
-    st.line_chart(total, x="dt", y=symbol_list + ["value"])
-with col2:
+    st.text(f"{euros_invested:.2f} EUR")
     portfolio_value = sum(summary.holding * summary.price)
     st.metric(
         label="Portfolio",
@@ -119,6 +116,21 @@ with col2:
         delta=display_delta(portfolio_value, usd_invested),
     )
     USD_purchase_price = usd_invested / euros_invested
+    time_period = st.selectbox("time period", ["1m", "3m", "6m", "1y"])
+with col2:
+    total = pd.DataFrame()
+    for symbol in symbol_list:
+        limit, interval = period_api_mapper.get(time_period)
+        df = get_hist_klines(symbol, limit=limit, interval=interval)[
+            ["close_time_dt", "close"]
+        ]
+        if total.empty:
+            total["dt"] = df["close_time_dt"]
+            total["value"] = 0.0
+        total[symbol] = df.close * summary.loc[symbol].holding
+        total["value"] += total[symbol]
+    st.line_chart(total, x="dt", y=symbol_list + ["value"])
+
     # st.metric(
     #     label=f"EUR/BUSD {USD_purchase_price:.3f}",
     #     value=round(EURBUSD_rate, 3),
@@ -130,7 +142,7 @@ with col2:
 for index, row in summary.sort_values(["invested"], ascending=False).iterrows():
     if row["invested"] == 0:
         continue
-    title = f'{index} {display_delta(row["price"],row["average_buy_price"], "pct")}, \
+    title = f'{index} / {display_delta(row["price"],row["average_buy_price"], "pct")} / \
     {display_delta(row["price"],row["average_buy_price"], "abs")}'
     with st.expander(title):
         col1, col2 = st.columns(2)

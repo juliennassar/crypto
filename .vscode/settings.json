@@ -14,4 +14,9 @@
         "source.fixAll": true,
         "source.organizeImports": true,
     },
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/.venv/*/**": true,
+    },
 }

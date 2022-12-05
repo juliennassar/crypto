@@ -14,12 +14,12 @@ import streamlit as st
 from db import get_trades
 
 
-def get_hist_klines(symbol, limit=180):
+def get_hist_klines(symbol, limit=180, interval="1d"):
     r = requests.get(
         "https://api.binance.com/api/v3/klines",
         params={
             "symbol": symbol,
-            "interval": "1d",
+            "interval": interval,
             "limit": limit,
         },
     )
@@ -52,7 +52,6 @@ def get_hist_klines(symbol, limit=180):
     return klines_df
 
 
-@st.experimental_memo
 def get_avg_price_for_symbol(symbol: str) -> float:
     r = requests.get(
         "https://api.binance.com/api/v3/avgPrice", params={"symbol": symbol}
